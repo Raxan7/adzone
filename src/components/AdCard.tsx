@@ -27,7 +27,10 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
   };
 
   return (
-    <div className="group bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden border border-gray-100 hover:border-blue-200 hover:-translate-y-1">
+    <div 
+      className={`group bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden border border-gray-100 hover:border-blue-200 hover:-translate-y-1 ${!isAdmin ? 'cursor-pointer hover:shadow-blue-200/50' : ''}`}
+      onClick={!isAdmin ? handleClick : undefined}
+    >
       {/* Image Section */}
       <div className="relative h-48 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200">
         {!imageLoaded && (
@@ -54,6 +57,15 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
         
         {/* Overlay */}
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300" />
+        
+        {/* Click hint for non-admin users */}
+        {!isAdmin && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
+            <div className="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg px-3 py-1 text-sm font-medium text-blue-600">
+              Click to view offer
+            </div>
+          </div>
+        )}
         
         {/* Click indicator */}
         {!isAdmin && (
@@ -87,13 +99,19 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
         {isAdmin ? (
           <div className="flex gap-2">
             <button
-              onClick={() => onEdit?.(ad)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.(ad);
+              }}
               className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium"
             >
               Edit
             </button>
             <button
-              onClick={() => onDelete?.(ad.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete?.(ad.id);
+              }}
               className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition-colors font-medium"
             >
               Delete
@@ -101,7 +119,10 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
           </div>
         ) : (
           <button
-            onClick={handleClick}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleClick();
+            }}
             className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-6 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
           >
             <span>View Offer</span>

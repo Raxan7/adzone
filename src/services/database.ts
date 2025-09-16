@@ -247,6 +247,20 @@ export class DatabaseService {
     }
   }
 
+  async incrementAdClicks(id: number): Promise<void> {
+    try {
+      console.log('Incrementing clicks for ad with id:', id);
+      await this.sql`
+        UPDATE ads
+        SET clicks = clicks + 1
+        WHERE id = ${id}
+      `;
+    } catch (error) {
+      console.error('Error incrementing ad clicks:', error);
+      throw error;
+    }
+  }
+
   async getAdStats(): Promise<{ totalAds: number; totalClicks: number; averageClicksPerAd: number }> {
     try {
       const result = await this.sql`
