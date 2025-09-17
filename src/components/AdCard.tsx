@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, Eye, TrendingUp } from 'lucide-react';
+import { ExternalLink, TrendingUp } from 'lucide-react';
 import { Ad } from '../types/Ad';
 import { db } from '../services/database';
 
@@ -11,8 +11,7 @@ interface AdCardProps {
 }
 
 export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onDelete }) => {
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageError, setImageError] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   const handleClick = async () => {
     if (!isAdmin) {
@@ -21,39 +20,29 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
     }
   };
 
-  const handleImageError = () => {
-    setImageError(true);
-    setImageLoaded(true);
-  };
-
   return (
     <div 
       className={`group bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden border border-gray-100 hover:border-blue-200 hover:-translate-y-1 ${!isAdmin ? 'cursor-pointer hover:shadow-blue-200/50' : ''}`}
       onClick={!isAdmin ? handleClick : undefined}
     >
-      {/* Image Section */}
-      <div className="relative h-48 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200">
-        {!imageLoaded && (
-          <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
-            <Eye className="text-gray-400" size={32} />
+      {/* Iframe Preview Section */}
+      <div className="relative h-64 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 border-b border-gray-200">
+        {!iframeLoaded && (
+          <div className="absolute inset-0 bg-gray-100 flex items-center justify-center z-10">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
+              <p className="text-xs text-gray-600">Loading preview...</p>
+            </div>
           </div>
         )}
         
-        {!imageError ? (
-          <img
-            src={ad.image_url}
-            alt={ad.title}
-            className={`w-full h-full object-cover transition-all duration-300 group-hover:scale-105 ${
-              imageLoaded ? 'opacity-100' : 'opacity-0'
-            }`}
-            onLoad={() => setImageLoaded(true)}
-            onError={handleImageError}
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-            <TrendingUp className="text-blue-500" size={48} />
-          </div>
-        )}
+        <iframe
+          src={ad.smart_link}
+          className="w-full h-full border-0"
+          onLoad={() => setIframeLoaded(true)}
+          title={`${ad.title} Preview`}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
         
         {/* Overlay */}
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300" />
@@ -62,7 +51,7 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
         {!isAdmin && (
           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
             <div className="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg px-3 py-1 text-sm font-medium text-blue-600">
-              Click to view offer
+              Click anywhere to open offer
             </div>
           </div>
         )}
@@ -123,9 +112,9 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
               e.stopPropagation();
               handleClick();
             }}
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-6 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
           >
-            <span>View Offer</span>
+            <span>Open Offer</span>
             <ExternalLink size={16} />
           </button>
         )}
