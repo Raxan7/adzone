@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Grid, List, TrendingUp } from 'lucide-react';
 import { AdCard } from './AdCard';
 import { Ad } from '../types/Ad';
@@ -9,10 +9,64 @@ export const PublicAdsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(true);
+  const autoScrollRef = useRef<{ rafId?: number; running: boolean }>({ running: false });
 
   useEffect(() => {
     loadAdsData();
   }, []);
+
+  // Auto-scroll effect: when loading finishes, begin a slow auto-scroll.
+  useEffect(() => {
+    if (loading) return;
+
+    // Respect user's preference for reduced motion
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
+
+  let lastTime = performance.now();
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    // If there's nowhere to scroll, don't start.
+    if (maxScroll <= 0) return;
+
+    autoScrollRef.current.running = true;
+
+    // Scroll speed: pixels per second (very gentle)
+    const speed = 60; // px per second
+
+    const step = (now: number) => {
+      if (!autoScrollRef.current.running) return;
+      const delta = (now - lastTime) / 1000; // seconds
+      lastTime = now;
+      const distance = speed * delta;
+      const next = Math.min(window.scrollY + distance, maxScroll);
+      window.scrollTo({ top: next, behavior: 'auto' });
+      // stop if reached bottom
+      if (next >= maxScroll) {
+        autoScrollRef.current.running = false;
+        return;
+      }
+      autoScrollRef.current.rafId = requestAnimationFrame(step);
+    };
+
+    // Start after a tiny delay so the user can orient
+    const startTimeout = window.setTimeout(() => {
+      autoScrollRef.current.rafId = requestAnimationFrame(step);
+    }, 600);
+
+    // Cancel auto-scroll on user interactions
+    const cancel = () => {
+      if (autoScrollRef.current.rafId) cancelAnimationFrame(autoScrollRef.current.rafId);
+      autoScrollRef.current.running = false;
+      window.clearTimeout(startTimeout);
+    };
+
+    ['wheel', 'touchstart', 'keydown', 'mousedown', 'scroll'].forEach(evt => window.addEventListener(evt, cancel, { passive: true }));
+
+    return () => {
+      cancel();
+      ['wheel', 'touchstart', 'keydown', 'mousedown', 'scroll'].forEach(evt => window.removeEventListener(evt, cancel));
+    };
+  }, [loading]);
 
   const loadAdsData = async () => {
     try {

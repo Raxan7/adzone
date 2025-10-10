@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ExternalLink, TrendingUp } from 'lucide-react';
 import { Ad } from '../types/Ad';
 import { db } from '../services/database';
@@ -12,6 +12,47 @@ interface AdCardProps {
 
 export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onDelete }) => {
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    // If already shouldLoad, nothing to do
+    if (shouldLoad) return;
+
+    // Respect reduced motion by loading as normal (don't delay)
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) {
+      setShouldLoad(true);
+      return;
+    }
+
+    // If IntersectionObserver is not supported, load immediately
+    if (!('IntersectionObserver' in window)) {
+      setShouldLoad(true);
+      return;
+    }
+
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+        }
+      });
+    }, {
+      root: null,
+      rootMargin: '200px', // start loading a bit before it enters
+      threshold: 0.01,
+    });
+
+    obs.observe(node);
+
+    return () => {
+      obs.disconnect();
+    };
+  }, [shouldLoad]);
 
   const handleClick = async () => {
     if (!isAdmin) {
@@ -26,7 +67,7 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
       onClick={!isAdmin ? handleClick : undefined}
     >
       {/* Iframe Preview Section */}
-      <div className="relative h-64 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 border-b border-gray-200">
+      <div ref={containerRef} className="relative h-64 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 border-b border-gray-200">
         {!iframeLoaded && (
           <div className="absolute inset-0 bg-gray-100 flex items-center justify-center z-10">
             <div className="text-center">
@@ -35,14 +76,18 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
             </div>
           </div>
         )}
-        
-        <iframe
-          src={ad.smart_link}
-          className="w-full h-full border-0"
-          onLoad={() => setIframeLoaded(true)}
-          title={`${ad.title} Preview`}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
+        {shouldLoad ? (
+          <iframe
+            src={ad.smart_link}
+            className="w-full h-full border-0"
+            onLoad={() => setIframeLoaded(true)}
+            title={`${ad.title} Preview`}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        ) : (
+          // lightweight placeholder to preserve layout until iframe loads
+          <div className="w-full h-full" aria-hidden />
+        )}
         
         {/* Overlay */}
         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300" />
@@ -122,3 +167,6 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
     </div>
   );
 };
+
+// IntersectionObserver setup for lazy loading
+// We attach effect inside module scope by exporting a small hook that AdCard could call.
