@@ -5,100 +5,130 @@ import { Ad } from '../types/Ad';
 import { db } from '../services/database';
 import { useLazyLoading } from '../hooks/useLazyLoading';
 
+const AUTO_SCROLL_SPEED = 200; // pixels per second
+
 export const PublicAdsPage: React.FC = () => {
   const [ads, setAds] = useState<Ad[]>([]);
+  const [shuffledAllAds, setShuffledAllAds] = useState<Ad[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(true);
   const [isAutoScrolling, setIsAutoScrolling] = useState(true);
   const [hasUserScrolled, setHasUserScrolled] = useState(false);
-  const autoScrollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const autoScrollLastTimeRef = useRef<number | null>(null);
+  const isAutoScrollingRef = useRef(false);
   const lastScrollTop = useRef(0);
 
   useEffect(() => {
     loadAdsData();
   }, []);
 
-  // Auto-scroll functionality
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollFrameRef.current !== null) {
+      cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    }
+    autoScrollLastTimeRef.current = null;
+    isAutoScrollingRef.current = false;
+  }, []);
+
   const startAutoScroll = useCallback(() => {
-    if (autoScrollIntervalRef.current) return;
-    
-    autoScrollIntervalRef.current = setInterval(() => {
+    if (autoScrollFrameRef.current !== null) return;
+
+    isAutoScrollingRef.current = true;
+    autoScrollLastTimeRef.current = null;
+
+    const step = (timestamp: number) => {
+      if (!isAutoScrollingRef.current) {
+        autoScrollFrameRef.current = null;
+        return;
+      }
+
+      if (autoScrollLastTimeRef.current === null) {
+        autoScrollLastTimeRef.current = timestamp;
+      }
+
+      const delta = timestamp - autoScrollLastTimeRef.current;
+      autoScrollLastTimeRef.current = timestamp;
+      const distance = (AUTO_SCROLL_SPEED * delta) / 1000;
+
       const scrollHeight = document.documentElement.scrollHeight;
       const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
       const clientHeight = window.innerHeight;
-      
-      // Check if we've reached the bottom
+
       if (scrollTop + clientHeight >= scrollHeight - 10) {
-        // Stop auto-scrolling when reaching the bottom
         stopAutoScroll();
+        setIsAutoScrolling(false);
         return;
       }
-      
-      // Smooth scroll down by small increments
-      window.scrollBy({
-        top: 8, // Scroll 8 pixels at a time for 2x faster scrolling
-        behavior: 'smooth'
-      });
-    }, 40); // Run every 40ms
-  }, []);
 
-  const stopAutoScroll = useCallback(() => {
-    if (autoScrollIntervalRef.current) {
-      clearInterval(autoScrollIntervalRef.current);
-      autoScrollIntervalRef.current = null;
-    }
-  }, []);
+      window.scrollBy(0, distance);
+
+      autoScrollFrameRef.current = requestAnimationFrame(step);
+    };
+
+    autoScrollFrameRef.current = requestAnimationFrame(step);
+  }, [stopAutoScroll]);
 
   const toggleAutoScroll = useCallback(() => {
     setIsAutoScrolling(prev => {
-      if (!prev) {
-        startAutoScroll();
-        return true;
+      const next = !prev;
+      if (next) {
+        setHasUserScrolled(false);
       } else {
         stopAutoScroll();
-        return false;
       }
+      return next;
     });
-  }, [startAutoScroll, stopAutoScroll]);
+  }, [stopAutoScroll]);
 
   // Detect user scrolling
   useEffect(() => {
+    const markUserInteraction = () => {
+      setHasUserScrolled(true);
+      if (isAutoScrollingRef.current) {
+        setIsAutoScrolling(false);
+        stopAutoScroll();
+      }
+    };
+
     const handleScroll = () => {
       const currentScrollTop = window.pageYOffset || document.documentElement.scrollTop;
-      
-      // Check if user manually scrolled (not auto-scroll)
-      if (Math.abs(currentScrollTop - lastScrollTop.current) > 5) {
-        if (!hasUserScrolled) {
-          setHasUserScrolled(true);
-          // Pause auto-scroll when user manually scrolls
-          if (isAutoScrolling) {
-            stopAutoScroll();
-            setIsAutoScrolling(false);
-          }
-        }
+
+      if (isAutoScrollingRef.current) {
+        lastScrollTop.current = currentScrollTop;
+        return;
       }
-      
+
+      if (Math.abs(currentScrollTop - lastScrollTop.current) > 5) {
+        markUserInteraction();
+      }
+
       lastScrollTop.current = currentScrollTop;
     };
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [hasUserScrolled, isAutoScrolling, stopAutoScroll]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const keysThatScroll = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Space', 'Home', 'End'];
+      if (keysThatScroll.includes(event.key)) {
+        markUserInteraction();
+      }
+    };
 
-  // Start auto-scroll when component mounts and ads are loaded
-  useEffect(() => {
-    if (!loading && ads.length > 0 && !hasUserScrolled) {
-      // Delay auto-scroll start to allow content to render
-      const timer = setTimeout(() => {
-        if (isAutoScrolling) {
-          startAutoScroll();
-        }
-      }, 1000); // Start after 1 second
-      
-      return () => clearTimeout(timer);
-    }
-  }, [loading, ads.length, hasUserScrolled, isAutoScrolling, startAutoScroll]);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('wheel', markUserInteraction, { passive: true });
+    window.addEventListener('touchstart', markUserInteraction, { passive: true });
+    window.addEventListener('pointerdown', markUserInteraction);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('wheel', markUserInteraction);
+      window.removeEventListener('touchstart', markUserInteraction);
+      window.removeEventListener('pointerdown', markUserInteraction);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [stopAutoScroll]);
 
   // Cleanup interval on unmount
   useEffect(() => {
@@ -125,9 +155,6 @@ export const PublicAdsPage: React.FC = () => {
     }
   };
 
-  // Keep a stable shuffled list of all ads to avoid reshuffling on every render
-  const [shuffledAllAds, setShuffledAllAds] = useState<Ad[]>([]);
-
   // Use the stable shuffledAllAds as the base order, then filter it for search
   const filteredAds = shuffledAllAds.filter(ad => {
     const matchesSearch = ad.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -148,6 +175,23 @@ export const PublicAdsPage: React.FC = () => {
     itemsPerPage: 8, // Load 8 ads initially, then 8 more each time
     rootMargin: '200px' // Start loading when user is 200px away from the trigger
   });
+
+  useEffect(() => {
+    if (!isAutoScrolling || hasUserScrolled || loading) {
+      stopAutoScroll();
+      return;
+    }
+
+    if (visibleAds.length === 0) {
+      return;
+    }
+
+    startAutoScroll();
+
+    return () => {
+      stopAutoScroll();
+    };
+  }, [isAutoScrolling, hasUserScrolled, loading, visibleAds.length, startAutoScroll, stopAutoScroll]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50">
