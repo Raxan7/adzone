@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ExternalLink, TrendingUp } from 'lucide-react';
 import { Ad } from '../types/Ad';
 import { db } from '../services/database';
+import { useLazyIframe } from '../hooks/useLazyIframe';
 
 interface AdCardProps {
   ad: Ad;
@@ -12,47 +13,10 @@ interface AdCardProps {
 
 export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onDelete }) => {
   const [iframeLoaded, setIframeLoaded] = useState(false);
-  const [shouldLoad, setShouldLoad] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-
-    // If already shouldLoad, nothing to do
-    if (shouldLoad) return;
-
-    // Respect reduced motion by loading as normal (don't delay)
-    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) {
-      setShouldLoad(true);
-      return;
-    }
-
-    // If IntersectionObserver is not supported, load immediately
-    if (!('IntersectionObserver' in window)) {
-      setShouldLoad(true);
-      return;
-    }
-
-    const obs = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          setShouldLoad(true);
-        }
-      });
-    }, {
-      root: null,
-      rootMargin: '200px', // start loading a bit before it enters
-      threshold: 0.01,
-    });
-
-    obs.observe(node);
-
-    return () => {
-      obs.disconnect();
-    };
-  }, [shouldLoad]);
+  const { elementRef, isVisible, handleLoad } = useLazyIframe({
+    rootMargin: '100px', // Start loading when iframe is 100px away from viewport
+    threshold: 0.1
+  });
 
   const handleClick = async () => {
     if (!isAdmin) {
@@ -67,26 +31,33 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
       onClick={!isAdmin ? handleClick : undefined}
     >
       {/* Iframe Preview Section */}
-      <div ref={containerRef} className="relative h-64 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 border-b border-gray-200">
-        {!iframeLoaded && (
+      <div 
+        ref={elementRef}
+        className="relative h-64 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 border-b border-gray-200"
+      >
+        {(!isVisible || !iframeLoaded) && (
           <div className="absolute inset-0 bg-gray-100 flex items-center justify-center z-10">
             <div className="text-center">
               <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
-              <p className="text-xs text-gray-600">Loading preview...</p>
+              <p className="text-xs text-gray-600">
+                {!isVisible ? 'Preparing preview...' : 'Loading preview...'}
+              </p>
             </div>
           </div>
         )}
-        {shouldLoad ? (
+        
+        {isVisible && (
           <iframe
             src={ad.smart_link}
             className="w-full h-full border-0"
-            onLoad={() => setIframeLoaded(true)}
+            onLoad={() => {
+              setIframeLoaded(true);
+              handleLoad();
+            }}
             title={`${ad.title} Preview`}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            loading="lazy"
           />
-        ) : (
-          // lightweight placeholder to preserve layout until iframe loads
-          <div className="w-full h-full" aria-hidden />
         )}
         
         {/* Overlay */}
@@ -167,6 +138,3 @@ export const AdCard: React.FC<AdCardProps> = ({ ad, isAdmin = false, onEdit, onD
     </div>
   );
 };
-
-// IntersectionObserver setup for lazy loading
-// We attach effect inside module scope by exporting a small hook that AdCard could call.

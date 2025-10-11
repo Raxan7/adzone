@@ -1,77 +1,123 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Grid, List, TrendingUp } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Search, Grid, List, TrendingUp, Pause, Play } from 'lucide-react';
 import { AdCard } from './AdCard';
 import { Ad } from '../types/Ad';
 import { db } from '../services/database';
+import { useLazyLoading } from '../hooks/useLazyLoading';
 
 export const PublicAdsPage: React.FC = () => {
   const [ads, setAds] = useState<Ad[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [loading, setLoading] = useState(true);
-  const autoScrollRef = useRef<{ rafId?: number; running: boolean }>({ running: false });
+  const [isAutoScrolling, setIsAutoScrolling] = useState(true);
+  const [hasUserScrolled, setHasUserScrolled] = useState(false);
+  const autoScrollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastScrollTop = useRef(0);
 
   useEffect(() => {
     loadAdsData();
   }, []);
 
-  // Auto-scroll effect: when loading finishes, begin a slow auto-scroll.
-  useEffect(() => {
-    if (loading) return;
-
-    // Respect user's preference for reduced motion
-    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) return;
-
-  let lastTime = performance.now();
-    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-    // If there's nowhere to scroll, don't start.
-    if (maxScroll <= 0) return;
-
-    autoScrollRef.current.running = true;
-
-    // Scroll speed: pixels per second (very gentle)
-    const speed = 60; // px per second
-
-    const step = (now: number) => {
-      if (!autoScrollRef.current.running) return;
-      const delta = (now - lastTime) / 1000; // seconds
-      lastTime = now;
-      const distance = speed * delta;
-      const next = Math.min(window.scrollY + distance, maxScroll);
-      window.scrollTo({ top: next, behavior: 'auto' });
-      // stop if reached bottom
-      if (next >= maxScroll) {
-        autoScrollRef.current.running = false;
+  // Auto-scroll functionality
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollIntervalRef.current) return;
+    
+    autoScrollIntervalRef.current = setInterval(() => {
+      const scrollHeight = document.documentElement.scrollHeight;
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const clientHeight = window.innerHeight;
+      
+      // Check if we've reached the bottom
+      if (scrollTop + clientHeight >= scrollHeight - 10) {
+        // Stop auto-scrolling when reaching the bottom
+        stopAutoScroll();
         return;
       }
-      autoScrollRef.current.rafId = requestAnimationFrame(step);
+      
+      // Smooth scroll down by small increments
+      window.scrollBy({
+        top: 8, // Scroll 8 pixels at a time for 2x faster scrolling
+        behavior: 'smooth'
+      });
+    }, 40); // Run every 40ms
+  }, []);
+
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollIntervalRef.current) {
+      clearInterval(autoScrollIntervalRef.current);
+      autoScrollIntervalRef.current = null;
+    }
+  }, []);
+
+  const toggleAutoScroll = useCallback(() => {
+    setIsAutoScrolling(prev => {
+      if (!prev) {
+        startAutoScroll();
+        return true;
+      } else {
+        stopAutoScroll();
+        return false;
+      }
+    });
+  }, [startAutoScroll, stopAutoScroll]);
+
+  // Detect user scrolling
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      
+      // Check if user manually scrolled (not auto-scroll)
+      if (Math.abs(currentScrollTop - lastScrollTop.current) > 5) {
+        if (!hasUserScrolled) {
+          setHasUserScrolled(true);
+          // Pause auto-scroll when user manually scrolls
+          if (isAutoScrolling) {
+            stopAutoScroll();
+            setIsAutoScrolling(false);
+          }
+        }
+      }
+      
+      lastScrollTop.current = currentScrollTop;
     };
 
-    // Start after a tiny delay so the user can orient
-    const startTimeout = window.setTimeout(() => {
-      autoScrollRef.current.rafId = requestAnimationFrame(step);
-    }, 600);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasUserScrolled, isAutoScrolling, stopAutoScroll]);
 
-    // Cancel auto-scroll on user interactions
-    const cancel = () => {
-      if (autoScrollRef.current.rafId) cancelAnimationFrame(autoScrollRef.current.rafId);
-      autoScrollRef.current.running = false;
-      window.clearTimeout(startTimeout);
-    };
+  // Start auto-scroll when component mounts and ads are loaded
+  useEffect(() => {
+    if (!loading && ads.length > 0 && !hasUserScrolled) {
+      // Delay auto-scroll start to allow content to render
+      const timer = setTimeout(() => {
+        if (isAutoScrolling) {
+          startAutoScroll();
+        }
+      }, 1000); // Start after 1 second
+      
+      return () => clearTimeout(timer);
+    }
+  }, [loading, ads.length, hasUserScrolled, isAutoScrolling, startAutoScroll]);
 
-    ['wheel', 'touchstart', 'keydown', 'mousedown', 'scroll'].forEach(evt => window.addEventListener(evt, cancel, { passive: true }));
-
+  // Cleanup interval on unmount
+  useEffect(() => {
     return () => {
-      cancel();
-      ['wheel', 'touchstart', 'keydown', 'mousedown', 'scroll'].forEach(evt => window.removeEventListener(evt, cancel));
+      stopAutoScroll();
     };
-  }, [loading]);
+  }, [stopAutoScroll]);
 
   const loadAdsData = async () => {
     try {
       const adsData = await db.getAllAds();
       setAds(adsData);
+      // Shuffle once when ads data is loaded to keep ordering stable across renders
+      const shuffled = [...adsData];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      setShuffledAllAds(shuffled);
     } catch (error) {
       console.error('Failed to load ads:', error);
     } finally {
@@ -79,14 +125,29 @@ export const PublicAdsPage: React.FC = () => {
     }
   };
 
-  const filteredAds = ads.filter(ad => {
+  // Keep a stable shuffled list of all ads to avoid reshuffling on every render
+  const [shuffledAllAds, setShuffledAllAds] = useState<Ad[]>([]);
+
+  // Use the stable shuffledAllAds as the base order, then filter it for search
+  const filteredAds = shuffledAllAds.filter(ad => {
     const matchesSearch = ad.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          ad.description.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
 
-  // Shuffle the filtered ads randomly
-  const shuffledAds = [...filteredAds].sort(() => Math.random() - 0.5);
+  // Use the filteredAds directly (they're already in a stable shuffled order)
+  const shuffledAds = filteredAds;
+
+  // Use lazy loading for the shuffled ads
+  const {
+    visibleItems: visibleAds,
+    isLoading: isLoadingMore,
+    hasMore,
+    observerRef
+  } = useLazyLoading(shuffledAds, {
+    itemsPerPage: 8, // Load 8 ads initially, then 8 more each time
+    rootMargin: '200px' // Start loading when user is 200px away from the trigger
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50">
@@ -107,6 +168,16 @@ export const PublicAdsPage: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-2">
+              <button
+                onClick={toggleAutoScroll}
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-1"
+                title={isAutoScrolling ? "Pause auto-scroll" : "Resume auto-scroll"}
+              >
+                {isAutoScrolling ? <Pause size={20} /> : <Play size={20} />}
+                <span className="text-sm hidden sm:inline">
+                  {isAutoScrolling ? 'Pause' : 'Resume'}
+                </span>
+              </button>
               <button
                 onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
                 className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
@@ -139,6 +210,11 @@ export const PublicAdsPage: React.FC = () => {
              searchTerm ? `${shuffledAds.length} Search Result${shuffledAds.length === 1 ? '' : 's'}` :
              `${shuffledAds.length} Product${shuffledAds.length === 1 ? '' : 's'} Available`}
           </h3>
+          {visibleAds.length < shuffledAds.length && (
+            <p className="text-sm text-gray-500">
+              Showing {visibleAds.length} of {shuffledAds.length} products
+            </p>
+          )}
         </div>
 
         {loading ? (
@@ -150,14 +226,37 @@ export const PublicAdsPage: React.FC = () => {
             <p className="text-gray-600">Please wait while we fetch the latest deals</p>
           </div>
         ) : shuffledAds.length > 0 ? (
-          <div className={viewMode === 'grid' 
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
-            : 'space-y-4'
-          }>
-            {shuffledAds.map(ad => (
-              <AdCard key={ad.id} ad={ad} />
-            ))}
-          </div>
+          <>
+            <div className={viewMode === 'grid' 
+              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+              : 'space-y-4'
+            }>
+              {visibleAds.map(ad => (
+                <AdCard key={ad.id} ad={ad} />
+              ))}
+            </div>
+
+            {/* Loading trigger and more content indicator */}
+            {hasMore && (
+              <div ref={observerRef} className="py-8">
+                {isLoadingMore ? (
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    </div>
+                    <p className="text-gray-600">Loading more ads...</p>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-2">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                    </div>
+                    <p className="text-sm text-gray-500">Scroll to load more</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           <div className="text-center py-16">
             {ads.length === 0 ? (
